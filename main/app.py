@@ -38,7 +38,7 @@ st.sidebar.markdown("# :blue-background[About the BSK ICT Club]")
 st.sidebar.markdown("> :red[The BSK ICT Club was started in 2022 by Tumwine Kelly.\n It was founded with an aim of promoting earlier exposure of students to advanced technology in areas of of coding, robotics , artificial intelligence, etc.]")
 
 st.sidebar.subheader("Why this Quiz ?")
-st.sidebar.radio("",["Hands on Learning","Real time feedback"])
+st.sidebar.radio("Hey",["Hands on Learning","Real time feedback"])
 
 st.sidebar.markdown(" ##### :green-background[Kindly subscribe to our newsletter]")
 
