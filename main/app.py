@@ -8,7 +8,7 @@ from datetime import datetime
 st.set_page_config(
     layout="wide",
     page_icon="🗳️",
-    page_title="BSK School | Online Voting System",
+    page_title="BSK ICT Club | Online Voting System",
     initial_sidebar_state="expanded"
 )
 
@@ -21,9 +21,19 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 DEFAULT_STUDENT_PASSWORD = "BSKICTCLUB@2026"
 ADMIN_PASSWORD = "ADMINICTCLUB@2026"
 
-# VOTING PERIOD
-VOTING_START = datetime(2026, 8, 5, 8, 0)
-VOTING_END = datetime(2026, 8, 5, 17, 0)
+# CLUB POSTS
+POSITIONS = [
+    "President", 
+    "Secretary", 
+    "Treasurer", 
+    "Speaker", 
+    "Projects Manager",
+    "Mobiliser/Coordinator"
+]
+
+# VOTING PERIOD - CHANGE THESE
+VOTING_START = datetime(2026, 8, 6, 8, 0) # 8am
+VOTING_END = datetime(2026, 8, 6, 17, 0) # 5pm
 
 # ========== DATABASE FUNCTIONS ==========
 def login(username, password):
@@ -35,10 +45,12 @@ def get_candidates(position):
     return res.data
 
 def cast_vote(username, candidate_id, candidate_name, position):
+    # Check if already voted for this position
     check = supabase.table("votes").select("*").eq("username", username).eq("position", position).execute()
     if check.data:
-        return False, "You have already voted for this position"
+        return False, f"You have already voted for {position}"
 
+    # Insert vote log
     supabase.table("votes").insert({
         "username": username,
         "candidate_id": candidate_id,
@@ -47,9 +59,14 @@ def cast_vote(username, candidate_id, candidate_name, position):
         "voted_at": datetime.now().isoformat()
     }).execute()
 
+    # Increase vote count
     supabase.rpc('increment_vote', {'candidate_id': candidate_id}).execute()
-    supabase.table("students").update({"has_voted": True}).eq("username", username).execute()
-    return True, f"Vote for {candidate_name} cast successfully!"
+    return True, f"Vote for {candidate_name} as {position} cast successfully!"
+
+def check_all_voted(username):
+    votes = supabase.table("votes").select("position").eq("username", username).execute()
+    voted_positions = [v['position'] for v in votes.data]
+    return set(voted_positions) == set(POSITIONS)
 
 def get_results():
     res = supabase.table("candidates").select("*").order("votes", desc=True).execute()
@@ -64,12 +81,10 @@ def reset_voter(username):
     for v in votes.data:
         supabase.rpc('decrement_vote', {'candidate_id': v['candidate_id']}).execute()
     supabase.table("votes").delete().eq("username", username).execute()
-    supabase.table("students").update({"has_voted": False}).eq("username", username).execute()
     return True
 
 def reset_election():
     supabase.table("votes").delete().neq("id", 0).execute()
-    supabase.table("students").update({"has_voted": False}).neq("username", "").execute()
     supabase.table("candidates").update({"votes": 0}).neq("id", 0).execute()
     return True
 
@@ -82,17 +97,19 @@ if 'vote_receipt' not in st.session_state:
 # ========== HEADER ==========
 col1, col2 = st.columns([3,1])
 with col1:
-    st.title("🗳️ BSK School Online Voting System")
+    st.title("🗳️ BSK ICT Club Online Voting System")
 with col2:
     now = datetime.now()
-    if now < VOTING_START: st.error(f"Starts: {VOTING_START.strftime('%d %b %H:%M')}")
+    if now < VOTING_START: st.error(f"Voting Starts: {VOTING_START.strftime('%d %b %H:%M')}")
     elif now > VOTING_END: st.error("Voting CLOSED")
     else: st.success(f"Voting OPEN - Ends {VOTING_END.strftime('%H:%M')}")
 
+st.caption("Secure. Transparent. One vote per post. Powered by BSK ICT Club")
+
 # ========== LOGIN PAGE ==========
 if st.session_state.user is None:
-    st.subheader("Login to Vote")
-    st.info(f"Username = Your Lastname in lowercase. Example: mpoza")
+    st.subheader("Member Login")
+    st.info(f"Username = Your Lastname in lowercase. Example: mpoza | Password: {DEFAULT_STUDENT_PASSWORD}")
     with st.form("login_form"):
         username = st.text_input("Username - Lastname in lowercase")
         password = st.text_input("Password", type="password")
@@ -112,61 +129,101 @@ else:
         st.session_state.vote_receipt = []
         st.rerun()
 
-    # STUDENT
+    # ========== MEMBER VOTING PAGE ==========
     if user['role'] == 'student':
         if datetime.now() < VOTING_START or datetime.now() > VOTING_END:
             st.error("Voting is currently closed")
-        elif user['has_voted']:
-            st.info("✅ You have already voted.")
+        elif check_all_voted(user['username']):
+            st.success("✅ You have voted for all positions. Thank you!")
+            st.subheader("Your Vote Receipt")
             for r in st.session_state.vote_receipt:
-                st.success(f"Voted for: **{r['candidate']}** - {r['position']}")
+                st.write(f"- Voted for: **{r['candidate']}** - Position: **{r['position']}**")
         else:
             st.subheader("Cast Your Vote")
-            positions = ["Head Prefect", "Deputy Head Prefect", "Girls Prefect", "Sports Prefect"]
-            for pos in positions:
+            st.warning("You must vote for all 6 positions. You can vote 1 position at a time.")
+
+            for pos in POSITIONS:
                 st.divider()
                 st.write(f"### {pos}")
                 candidates = get_candidates(pos)
-                if candidates:
-                    for c in candidates:
-                        col1, col2 = st.columns([3,1])
-                        with col1: st.write(f"**{c['name']}** - Current votes: {c['votes']}")
-                        with col2:
-                            if st.button(f"Vote", key=f"{pos}_{c['id']}"):
+                
+                # Check if already voted for this position
+                already_voted = supabase.table("votes").select("*").eq("username", user['username']).eq("position", pos).execute()
+                
+                if already_voted.data:
+                    st.success(f"✅ Already voted for {pos}")
+                elif candidates:
+                    cols = st.columns(min(3, len(candidates)))
+                    for i, c in enumerate(candidates):
+                        with cols[i % 3]:
+                            st.metric(label=c['name'], value=f"{c['votes']} votes")
+                            if st.button(f"Vote {c['name']}", key=f"{pos}_{c['id']}", use_container_width=True):
                                 success, msg = cast_vote(user['username'], c['id'], c['name'], pos)
                                 if success:
                                     st.session_state.vote_receipt.append({"candidate": c['name'], "position": pos})
-                                    st.success(msg); time.sleep(1); st.rerun()
+                                    st.success(msg)
+                                    time.sleep(0.5)
+                                    st.rerun()
                                 else: st.error(msg)
-                else: st.warning(f"No candidates for {pos}")
+                else: 
+                    st.warning(f"No candidates added for {pos} yet")
 
-    # ADMIN
+    # ========== ADMIN PANEL ==========
     if user['role'] in ['patron', 'president']:
         st.sidebar.markdown("---")
-        tab1, tab2, tab3, tab4 = st.tabs(["➕ Add Candidate", "📊 Results", "🔄 Restore Voter", "⚠️ Reset Election"])
+        st.sidebar.subheader("Admin Controls")
+
+        tab1, tab2, tab3, tab4 = st.tabs(["➕ Add Candidate", "📊 Live Results", "🔄 Restore Voter", "⚠️ Reset Election"])
+
         with tab1:
-            name = st.text_input("Candidate Name")
-            position = st.selectbox("Position", ["Head Prefect", "Deputy Head Prefect", "Girls Prefect", "Sports Prefect"])
-            if st.button("Add Candidate"):
-                supabase.table("candidates").insert({"name": name, "position": position}).execute()
-                st.success(f"{name} added")
+            st.subheader("Add New Candidate")
+            with st.form("add_candidate"):
+                name = st.text_input("Candidate Full Name")
+                position = st.selectbox("Position", POSITIONS)
+                if st.form_submit_button("Add Candidate"):
+                    supabase.table("candidates").insert({"name": name, "position": position}).execute()
+                    st.success(f"{name} added for {position}")
+
         with tab2:
-            df = pd.DataFrame(get_results())
+            st.subheader("Live Results Dashboard")
+            results = get_results()
+            df = pd.DataFrame(results)
             if not df.empty:
-                for pos in df['position'].unique():
-                    st.write(f"#### {pos}")
-                    st.dataframe(df[df['position']==pos][['name', 'votes']])
-                st.download_button("Download CSV", df.to_csv(index=False), "results.csv")
-            st.dataframe(pd.DataFrame(get_audit_log())[["username","candidate_name","position","voted_at"]])
+                for pos in POSITIONS:
+                    pos_df = df[df['position'] == pos].sort_values('votes', ascending=False)
+                    if not pos_df.empty:
+                        st.write(f"#### {pos}")
+                        st.dataframe(pos_df[['name', 'votes']], use_container_width=True, hide_index=True)
+                        st.bar_chart(pos_df.set_index('name')['votes'])
+
+                csv = df.to_csv(index=False)
+                st.download_button("📥 Download Results CSV", csv, "bsk_ict_results.csv", "text/csv")
+            else:
+                st.info("No candidates added yet.")
+
+            st.divider()
+            st.subheader("Audit Log")
+            audit = get_audit_log()
+            audit_df = pd.DataFrame(audit)
+            if not audit_df.empty:
+                st.dataframe(audit_df[['username','candidate_name','position','voted_at']], use_container_width=True, hide_index=True)
+            else:
+                st.info("No votes cast yet")
+
         with tab3:
-            username_to_reset = st.text_input("Enter Username to Reset")
-            if st.button("Reset Voter"):
+            st.subheader("Restore Voter Access")
+            st.warning("Use this if a member claims someone voted using their credentials. This deletes all their votes.")
+            username_to_reset = st.text_input("Enter Username to Reset - lastname lowercase")
+            if st.button("Reset This Voter", type="secondary"):
                 reset_voter(username_to_reset)
-                st.success(f"{username_to_reset} can vote again")
+                st.success(f"{username_to_reset} can now vote again for all positions.")
+
         with tab4:
+            st.subheader("Danger Zone")
+            st.error("This will delete ALL votes and reset vote counts to 0")
             if st.button("RESET ENTIRE ELECTION", type="primary"):
                 reset_election()
-                st.success("Election reset")
+                st.success("Election has been reset. All members can vote again.")
 
 st.markdown("---")
-st.caption("Developed by BSK ICT Club")
+st.markdown("#### :green-background[Developed by BSK ICT Club | Do not share your password]")
