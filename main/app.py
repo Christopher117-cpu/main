@@ -1,107 +1,172 @@
 import streamlit as st
+from supabase import create_client, Client
 import time
+import pandas as pd
+from datetime import datetime
 
+# ========== CONFIG ==========
 st.set_page_config(
-    layout="centered",
-    page_icon="tt.jpg",
-    page_title="BSK ICT Club | Python Coding",
+    layout="wide",
+    page_icon="🗳️",
+    page_title="BSK School | Online Voting System",
     initial_sidebar_state="expanded"
 )
 
-st.title("BSK ICT Club Python Coding Quiz")
+# YOUR SUPABASE CREDENTIALS
+SUPABASE_URL = "https://vxdizbiaucutdutafuxv.supabase.co"
+SUPABASE_KEY = "sb_publishable_KwmVUTPjMdLlwDbiesqUVw_CTI2cpqX"
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-st.write("1. **What is the output of this code ?**")
+# PASSWORDS
+DEFAULT_STUDENT_PASSWORD = "BSKICTCLUB@2026"
+ADMIN_PASSWORD = "ADMINICTCLUB@2026"
 
-code = "print('Hello World')"
+# VOTING PERIOD
+VOTING_START = datetime(2026, 8, 5, 8, 0)
+VOTING_END = datetime(2026, 8, 5, 17, 0)
 
-st.code(code)
+# ========== DATABASE FUNCTIONS ==========
+def login(username, password):
+    res = supabase.table("students").select("*").eq("username", username.lower()).eq("password", password).execute()
+    return res.data[0] if res.data else None
 
-response = st.radio("Choose one",["Hello World","print('Hello World')"],disabled=False)
+def get_candidates(position):
+    res = supabase.table("candidates").select("*").eq("position", position).order("name").execute()
+    return res.data
 
-btn1 = st.button(label="Submit",type="primary",key=1)
+def cast_vote(username, candidate_id, candidate_name, position):
+    check = supabase.table("votes").select("*").eq("username", username).eq("position", position).execute()
+    if check.data:
+        return False, "You have already voted for this position"
 
-if btn1:
-    if response == "Hello World":
-        st.write("✔ Your submission is correct")
-    else:
-        st.write("👎 Wrong response . Keep Trying")
+    supabase.table("votes").insert({
+        "username": username,
+        "candidate_id": candidate_id,
+        "candidate_name": candidate_name,
+        "position": position,
+        "voted_at": datetime.now().isoformat()
+    }).execute()
 
+    supabase.rpc('increment_vote', {'candidate_id': candidate_id}).execute()
+    supabase.table("students").update({"has_voted": True}).eq("username", username).execute()
+    return True, f"Vote for {candidate_name} cast successfully!"
 
-code = '''
-first_name = "Mpoza"
-last_name = "Christopher"
-print(first_name,last_name)
-'''
+def get_results():
+    res = supabase.table("candidates").select("*").order("votes", desc=True).execute()
+    return res.data
 
-st.sidebar.markdown("# :blue-background[About the BSK ICT Club]")
+def get_audit_log():
+    res = supabase.table("votes").select("*").order("voted_at", desc=True).execute()
+    return res.data
 
-st.sidebar.markdown("> :red[The BSK ICT Club was started in 2022 by Tumwine Kelly.\n It was founded with an aim of promoting earlier exposure of students to advanced technology in areas of of coding, robotics , artificial intelligence, etc.]")
+def reset_voter(username):
+    votes = supabase.table("votes").select("*").eq("username", username).execute()
+    for v in votes.data:
+        supabase.rpc('decrement_vote', {'candidate_id': v['candidate_id']}).execute()
+    supabase.table("votes").delete().eq("username", username).execute()
+    supabase.table("students").update({"has_voted": False}).eq("username", username).execute()
+    return True
 
-st.sidebar.subheader("Why this Quiz ?")
-st.sidebar.radio("Hey",["Hands on Learning","Real time feedback"])
+def reset_election():
+    supabase.table("votes").delete().neq("id", 0).execute()
+    supabase.table("students").update({"has_voted": False}).neq("username", "").execute()
+    supabase.table("candidates").update({"votes": 0}).neq("id", 0).execute()
+    return True
 
-st.sidebar.markdown(" ##### :green-background[Kindly subscribe to our newsletter]")
+# ========== SESSION STATE ==========
+if 'user' not in st.session_state:
+    st.session_state.user = None
+if 'vote_receipt' not in st.session_state:
+    st.session_state.vote_receipt = []
 
-name = st.sidebar.text_input(label="Your Surname : ")
-email = st.sidebar.text_input(label="Email Address : ")
+# ========== HEADER ==========
+col1, col2 = st.columns([3,1])
+with col1:
+    st.title("🗳️ BSK School Online Voting System")
+with col2:
+    now = datetime.now()
+    if now < VOTING_START: st.error(f"Starts: {VOTING_START.strftime('%d %b %H:%M')}")
+    elif now > VOTING_END: st.error("Voting CLOSED")
+    else: st.success(f"Voting OPEN - Ends {VOTING_END.strftime('%H:%M')}")
 
-btn0 = st.sidebar.button(label="Subscribe...")
+# ========== LOGIN PAGE ==========
+if st.session_state.user is None:
+    st.subheader("Login to Vote")
+    st.info(f"Username = Your Lastname in lowercase. Example: mpoza")
+    with st.form("login_form"):
+        username = st.text_input("Username - Lastname in lowercase")
+        password = st.text_input("Password", type="password")
+        if st.form_submit_button("Login", type="primary"):
+            user = login(username, password)
+            if user:
+                st.session_state.user = user
+                st.rerun()
+            else:
+                st.error("Invalid Username or Password")
+else:
+    user = st.session_state.user
+    st.sidebar.success(f"Logged in as: **{user['name']}**")
+    st.sidebar.caption(f"Username: {user['username']} | Role: {user['role'].title()}")
+    if st.sidebar.button("Logout"):
+        st.session_state.user = None
+        st.session_state.vote_receipt = []
+        st.rerun()
 
-if btn0:
-    if name and email:
-        st.sidebar.write(f"Thanks {name} for subscribing to our newsletter .")
-    else:
-        pass
+    # STUDENT
+    if user['role'] == 'student':
+        if datetime.now() < VOTING_START or datetime.now() > VOTING_END:
+            st.error("Voting is currently closed")
+        elif user['has_voted']:
+            st.info("✅ You have already voted.")
+            for r in st.session_state.vote_receipt:
+                st.success(f"Voted for: **{r['candidate']}** - {r['position']}")
+        else:
+            st.subheader("Cast Your Vote")
+            positions = ["Head Prefect", "Deputy Head Prefect", "Girls Prefect", "Sports Prefect"]
+            for pos in positions:
+                st.divider()
+                st.write(f"### {pos}")
+                candidates = get_candidates(pos)
+                if candidates:
+                    for c in candidates:
+                        col1, col2 = st.columns([3,1])
+                        with col1: st.write(f"**{c['name']}** - Current votes: {c['votes']}")
+                        with col2:
+                            if st.button(f"Vote", key=f"{pos}_{c['id']}"):
+                                success, msg = cast_vote(user['username'], c['id'], c['name'], pos)
+                                if success:
+                                    st.session_state.vote_receipt.append({"candidate": c['name'], "position": pos})
+                                    st.success(msg); time.sleep(1); st.rerun()
+                                else: st.error(msg)
+                else: st.warning(f"No candidates for {pos}")
 
-st.write("2. **Now guess the output of this ...**")
+    # ADMIN
+    if user['role'] in ['patron', 'president']:
+        st.sidebar.markdown("---")
+        tab1, tab2, tab3, tab4 = st.tabs(["➕ Add Candidate", "📊 Results", "🔄 Restore Voter", "⚠️ Reset Election"])
+        with tab1:
+            name = st.text_input("Candidate Name")
+            position = st.selectbox("Position", ["Head Prefect", "Deputy Head Prefect", "Girls Prefect", "Sports Prefect"])
+            if st.button("Add Candidate"):
+                supabase.table("candidates").insert({"name": name, "position": position}).execute()
+                st.success(f"{name} added")
+        with tab2:
+            df = pd.DataFrame(get_results())
+            if not df.empty:
+                for pos in df['position'].unique():
+                    st.write(f"#### {pos}")
+                    st.dataframe(df[df['position']==pos][['name', 'votes']])
+                st.download_button("Download CSV", df.to_csv(index=False), "results.csv")
+            st.dataframe(pd.DataFrame(get_audit_log())[["username","candidate_name","position","voted_at"]])
+        with tab3:
+            username_to_reset = st.text_input("Enter Username to Reset")
+            if st.button("Reset Voter"):
+                reset_voter(username_to_reset)
+                st.success(f"{username_to_reset} can vote again")
+        with tab4:
+            if st.button("RESET ENTIRE ELECTION", type="primary"):
+                reset_election()
+                st.success("Election reset")
 
-st.code(code,language="python")
-
-response2 = st.radio("Choose one",["MpozaChristopher","print('Mpoza','Christopher')","Mpoza Christopher"])
-
-btn2 = st.button(label="Submit",type="primary",key=2)
-
-if btn2:
-    if response2 == "Mpoza Christopher":
-        st.write("✔ Your submission is correct")
-    else:
-        st.write("👎 Wrong response . Keep Trying")
-
-st.write("3. **What data type is this ?**")
-
-code = """
-names = {'Mpoza','Mark','Christopher','Henry','Mark'}
-"""
-
-st.code(code,language="python")
-
-response2 = st.radio("Choose one",["List","Set","Dictionary"])
-
-btn2 = st.button(label="Submit",type="primary",key=3)
-
-if btn2:
-    if response2 == "Set":
-        st.write("✔ Your submission is correct")
-    else:
-        st.write("👎 Wrong response . Keep Trying")
-
-
-st.write("4. **What type of operators are these in python ?** ")
-
-code = "+ , - ,* , / "
-
-st.code(code)
-
-response3 = st.radio("Choose one",["Assignment operators","Arithmetic Operators","Logical operators","Comparison operators","Membership operators"])
-
-btn2 = st.button(label="Submit",type="primary",key=4)
-
-if btn2:
-    if response3 == "Arithmetic Operators":
-        st.write("✔ Your submission is correct")
-    else:
-        st.write("👎 Wrong response . Keep Trying")
-    time.sleep(5)
-    st.markdown("### :green-background[Congratulations ....! You've made it to the end of this level ]")
-
-    st.button("Next Level")
+st.markdown("---")
+st.caption("Developed by BSK ICT Club")
