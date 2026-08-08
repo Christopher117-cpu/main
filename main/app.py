@@ -6,42 +6,24 @@ import plotly.express as px
 from datetime import datetime
 
 # ========== CONFIG ==========
-st.set_page_config(
-    layout="wide",
-    page_icon="🗳️",
-    page_title="BSK ICT Club | Online Voting System",
-    initial_sidebar_state="collapsed"
-)
-
-st.markdown("""
-<style>
-.stButton>button { width: 100%; border-radius: 10px; font-weight: 600; }
-.stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 10px; text-align: center; }
-</style>
-""", unsafe_allow_html=True)
+st.set_page_config(layout="wide", page_icon="🗳️", page_title="BSK ICT Club | Online Voting System", initial_sidebar_state="collapsed")
 
 # ========== SUPABASE CREDENTIALS ==========
 SUPABASE_URL = "https://vxdizbiaucutdutafuxv.supabase.co"
 SUPABASE_KEY = "sb_publishable_KwmVUTPjMdLlwDbiesqUVw_CTI2cpqX"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ========== PASSWORDS - HIDDEN ==========
+# ========== PASSWORDS ==========
 DEFAULT_STUDENT_PASSWORD = "BSKICTCLUB@2026"
 ADMIN_PASSWORD = "ADMINICTCLUB@2026"
 
-# ========== ELECTION SETTINGS ==========
-POSITIONS = [
-    "President", "Secretary", "Treasurer", "Speaker",
-    "Projects Manager", "Mobiliser/Coordinator"
-]
-
+POSITIONS = ["President", "Secretary", "Treasurer", "Speaker", "Projects Manager", "Mobiliser/Coordinator"]
 VOTING_START = datetime(2026, 8, 8, 0, 0)
 VOTING_END = datetime(2026, 8, 18, 17, 0)
-
 CAN_VOTE_ROLES = ['student', 'candidate', 'president', 'patron']
 ADMIN_ROLES = ['patron', 'president']
 
-# ========== DATABASE FUNCTIONS ==========
+# ========== DB FUNCTIONS ==========
 def get_election_status():
     try:
         res = supabase.table("settings").select("is_active").eq("id", 1).execute()
@@ -49,9 +31,7 @@ def get_election_status():
         else:
             supabase.table("settings").insert({"id": 1, "is_active": True}).execute()
             return True
-    except Exception as e: 
-        st.error(f"DB Error: {str(e)}") # FIX: Convert error to string
-        return True
+    except: return True
 
 def set_election_status(status: bool):
     supabase.table("settings").update({"is_active": status}).eq("id", 1).execute()
@@ -70,10 +50,7 @@ def register_student(name, username, role="student"):
     check = supabase.table("students").select("*").eq("username", username.lower()).execute()
     if check.data: return False, "Username already exists"
     password = ADMIN_PASSWORD if role in ADMIN_ROLES else DEFAULT_STUDENT_PASSWORD
-    supabase.table("students").insert({
-        "name": name, "username": username.lower(),
-        "password": password, "role": role
-    }).execute()
+    supabase.table("students").insert({"name": name, "username": username.lower(), "password": password, "role": role}).execute()
     return True, f"{role.title()} {name} registered successfully"
 
 def get_candidates(position):
@@ -83,11 +60,7 @@ def get_candidates(position):
 def cast_vote(username, candidate_id, candidate_name, position):
     check = supabase.table("votes").select("*").eq("username", username).eq("position", position).execute()
     if check.data: return False, f"You have already voted for {position}"
-    supabase.table("votes").insert({
-        "username": username, "candidate_id": candidate_id,
-        "candidate_name": candidate_name, "position": position,
-        "voted_at": datetime.now().isoformat()
-    }).execute()
+    supabase.table("votes").insert({"username": username, "candidate_id": candidate_id, "candidate_name": candidate_name, "position": position, "voted_at": datetime.now().isoformat()}).execute()
     supabase.rpc('increment_vote', {'candidate_id': candidate_id}).execute()
     return True, f"Vote for {candidate_name} as {position} cast successfully!"
 
@@ -117,27 +90,23 @@ def reset_election():
     set_election_status(True)
     return True
 
-# ========== SESSION STATE ==========
+# ========== SESSION ==========
 if 'user' not in st.session_state: st.session_state.user = None
 if 'vote_receipt' not in st.session_state: st.session_state.vote_receipt = []
 
 # ========== HEADER ==========
 col1, col2 = st.columns([3,1])
-with col1:
-    st.title("🗳️ BSK ICT Club Online Voting System")
+with col1: st.title("🗳️ BSK ICT Club Online Voting System")
 with col2:
     now = datetime.now()
     election_active_db = get_election_status()
     voting_open = VOTING_START <= now <= VOTING_END and election_active_db
-
     if not election_active_db: st.error("Voting MANUALLY STOPPED")
     elif now < VOTING_START: st.warning(f"Starts: {VOTING_START.strftime('%d %b %H:%M')}")
-    elif now > VOTING_END: st.error("Voting CLOSED - Time Ended")
+    elif now > VOTING_END: st.error("Voting CLOSED")
     else: st.success(f"Voting OPEN - Ends {VOTING_END.strftime('%d %b %H:%M')}")
 
-st.caption("Secure. Transparent. One vote per post. Powered by BSK ICT Club")
-
-# ========== LOGIN PAGE ==========
+# ========== LOGIN ==========
 if st.session_state.user is None:
     st.subheader("Member Login")
     st.info(f"Students & Candidates: Use password `{DEFAULT_STUDENT_PASSWORD}`")
@@ -147,8 +116,11 @@ if st.session_state.user is None:
         password = st.text_input("Password", type="password")
         if st.form_submit_button("Login", type="primary", use_container_width=True):
             user = login(username, password)
-            if user: st.session_state.user = user; st.rerun()
-            else: st.error("Invalid Username or Password")
+            if user: 
+                st.session_state.user = user
+                st.rerun()
+            else: 
+                st.error("Invalid Username or Password")
 else:
     user = st.session_state.user
     st.sidebar.success(f"Logged in as: **{user['name']}**")
@@ -160,7 +132,7 @@ else:
     election_active_db = get_election_status()
     voting_open = VOTING_START <= now <= VOTING_END and election_active_db
 
-    # ========== VOTING PAGE ==========
+    # ========== VOTING ==========
     if user['role'] in CAN_VOTE_ROLES:
         if not voting_open:
             st.error("Voting is currently closed")
@@ -173,7 +145,6 @@ else:
         else:
             show_results_to_all = False
             st.subheader("Cast Your Vote")
-            st.warning("Vote for all 6 positions. 1 position at a time.")
             for pos in POSITIONS:
                 st.divider(); st.write(f"### {pos}")
                 candidates = get_candidates(pos)
@@ -186,11 +157,16 @@ else:
                             st.metric(label=c['name'], value=f"{c['votes']} votes")
                             if st.button(f"Vote {c['name']}", key=f"{pos}_{c['id']}", use_container_width=True):
                                 success, msg = cast_vote(user['username'], c['id'], c['name'], pos)
-                                if success: st.session_state.vote_receipt.append({"candidate": c['name'], "position": pos}); st.success(msg); time.sleep(0.3); st.rerun()
-                                else: st.error(msg)
+                                if success: 
+                                    st.session_state.vote_receipt.append({"candidate": c['name'], "position": pos})
+                                    st.success(msg)
+                                    time.sleep(0.3)
+                                    st.rerun()
+                                else: 
+                                    st.error(msg)
                 else: st.warning(f"No candidates for {pos}")
 
-    # ========== ADMIN PANEL ==========
+    # ========== ADMIN ==========
     if user['role'] in ADMIN_ROLES:
         st.sidebar.markdown("---"); st.sidebar.subheader("Admin Controls")
         tab0, tab1, tab2, tab3, tab4, tab5 = st.tabs(["👤 Register", "➕ Candidate", "📊 Results", "⏹️ Control", "🔄 Restore", "⚠️ Reset"])
@@ -201,22 +177,29 @@ else:
                 name = st.text_input("Full Name"); username = st.text_input("Username lowercase")
                 role = st.selectbox("Role", ["student", "candidate", "president", "patron"])
                 if st.form_submit_button("Register", use_container_width=True):
-                    if name and username: success, msg = register_student(name, username, role); st.success(msg) if success else st.error(msg)
-                    else: st.error("Fill all fields")
+                    if name and username:
+                        success, msg = register_student(name, username, role)
+                        if success:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
+                    else: 
+                        st.error("Fill all fields")
 
         with tab1:
             st.subheader("Add New Candidate")
             with st.form("add_candidate"):
                 name = st.text_input("Candidate Name"); position = st.selectbox("Position", POSITIONS)
                 if st.form_submit_button("Add", use_container_width=True):
-                    supabase.table("candidates").insert({"name": name, "position": position, "votes": 0}).execute(); st.success(f"{name} added")
+                    supabase.table("candidates").insert({"name": name, "position": position, "votes": 0}).execute()
+                    st.success(f"{name} added")
 
         with tab2: st.subheader("Live Results Dashboard"); show_results_to_all = True
 
         with tab3:
             st.subheader("Election Control Panel")
             current_status = "ACTIVE" if election_active_db else "STOPPED"
-            st.write(f"Current Status: **{current_status}**") # FIX: Only print string
+            st.write(f"Current Status: **{current_status}**")
             col_a, col_b = st.columns(2)
             with col_a:
                 if st.button("🟢 START ELECTION", use_container_width=True, disabled=election_active_db):
@@ -232,9 +215,7 @@ else:
                     pos_df = df[df['position'] == pos].sort_values('votes', ascending=True)
                     if not pos_df.empty:
                         st.write(f"#### {pos}")
-                        fig = px.bar(pos_df, x='votes', y='name', orientation='h', text='votes', color='votes',
-                                     color_continuous_scale=px.colors.sequential.Turbo)
-                        fig.update_traces(textposition='outside', marker=dict(cornerradius=12))
+                        fig = px.bar(pos_df, x='votes', y='name', orientation='h', text='votes', color='votes')
                         fig.update_layout(showlegend=False, yaxis={'categoryorder':'total ascending'}, height=300)
                         st.plotly_chart(fig, use_container_width=True)
                 st.download_button("📥 Download CSV", df.to_csv(index=False), "bsk_ict_results.csv")
@@ -247,13 +228,15 @@ else:
 
         with tab4:
             st.subheader("Restore Voter"); username_to_reset = st.text_input("Username to Reset")
-            if st.button("Reset Voter", use_container_width=True): reset_voter(username_to_reset); st.success(f"{username_to_reset} reset")
+            if st.button("Reset Voter", use_container_width=True): 
+                reset_voter(username_to_reset)
+                st.success(f"{username_to_reset} reset")
 
         with tab5:
             st.subheader("Danger Zone"); st.error("Deletes ALL votes")
-            if st.button("RESET ENTIRE ELECTION", type="primary", use_container_width=True): reset_election(); st.success("Election Reset")
+            if st.button("RESET ENTIRE ELECTION", type="primary", use_container_width=True): 
+                reset_election()
+                st.success("Election Reset")
 
-# FOOTER
 st.markdown("---")
 st.markdown("<center>🗳️ <b>Developed by Mpoza Christopher</b> | BSK ICT Club 2026</center>", unsafe_allow_html=True)
-st.markdown("<center><small>Do not share your password</small></center>", unsafe_allow_html=True)
