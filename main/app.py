@@ -15,8 +15,8 @@ st.set_page_config(
 
 st.markdown("""
 <style>
- .stButton>button { width: 100%; border-radius: 10px; font-weight: 600; }
- .stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 10px; text-align: center; }
+.stButton>button { width: 100%; border-radius: 10px; font-weight: 600; }
+.stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 10px; text-align: center; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -25,7 +25,7 @@ SUPABASE_URL = "https://vxdizbiaucutdutafuxv.supabase.co"
 SUPABASE_KEY = "sb_publishable_KwmVUTPjMdLlwDbiesqUVw_CTI2cpqX"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ========== PASSWORDS - NOW HIDDEN ==========
+# ========== PASSWORDS - HIDDEN ==========
 DEFAULT_STUDENT_PASSWORD = "BSKICTCLUB@2026"
 ADMIN_PASSWORD = "ADMINICTCLUB@2026"
 
@@ -49,7 +49,9 @@ def get_election_status():
         else:
             supabase.table("settings").insert({"id": 1, "is_active": True}).execute()
             return True
-    except: return True # Fallback if table missing
+    except Exception as e: 
+        st.error(f"DB Error: {str(e)}") # FIX: Convert error to string
+        return True
 
 def set_election_status(status: bool):
     supabase.table("settings").update({"is_active": status}).eq("id", 1).execute()
@@ -57,19 +59,16 @@ def set_election_status(status: bool):
 def login(username, password):
     res = supabase.table("students").select("*").eq("username", username.lower()).execute()
     if not res.data: return None
-
     user = res.data[0]
-    # Check password based on role
     if user['role'] in ADMIN_ROLES:
         if password == ADMIN_PASSWORD: return user
-    else: # student or candidate
+    else:
         if password == DEFAULT_STUDENT_PASSWORD: return user
     return None
 
 def register_student(name, username, role="student"):
     check = supabase.table("students").select("*").eq("username", username.lower()).execute()
     if check.data: return False, "Username already exists"
-
     password = ADMIN_PASSWORD if role in ADMIN_ROLES else DEFAULT_STUDENT_PASSWORD
     supabase.table("students").insert({
         "name": name, "username": username.lower(),
@@ -84,7 +83,6 @@ def get_candidates(position):
 def cast_vote(username, candidate_id, candidate_name, position):
     check = supabase.table("votes").select("*").eq("username", username).eq("position", position).execute()
     if check.data: return False, f"You have already voted for {position}"
-
     supabase.table("votes").insert({
         "username": username, "candidate_id": candidate_id,
         "candidate_name": candidate_name, "position": position,
@@ -139,11 +137,11 @@ with col2:
 
 st.caption("Secure. Transparent. One vote per post. Powered by BSK ICT Club")
 
-# ========== LOGIN PAGE - ADMIN PASSWORD HIDDEN ==========
+# ========== LOGIN PAGE ==========
 if st.session_state.user is None:
     st.subheader("Member Login")
     st.info(f"Students & Candidates: Use password `{DEFAULT_STUDENT_PASSWORD}`")
-    st.warning("Patron & President: Use your admin password") # <-- HIDDEN NOW
+    st.warning("Patron & President: Use your admin password") 
     with st.form("login_form"):
         username = st.text_input("Username - Lastname lowercase")
         password = st.text_input("Password", type="password")
@@ -218,7 +216,7 @@ else:
         with tab3:
             st.subheader("Election Control Panel")
             current_status = "ACTIVE" if election_active_db else "STOPPED"
-            st.write(f"Current Status: **{current_status}**")
+            st.write(f"Current Status: **{current_status}**") # FIX: Only print string
             col_a, col_b = st.columns(2)
             with col_a:
                 if st.button("🟢 START ELECTION", use_container_width=True, disabled=election_active_db):
