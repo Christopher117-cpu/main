@@ -13,52 +13,53 @@ st.set_page_config(
     initial_sidebar_state="collapsed" # Better for mobile
 )
 
-# CUSTOM CSS FOR MOBILE RESPONSIVENESS
+# CUSTOM CSS FOR MOBILE
 st.markdown("""
 <style>
-   .stButton>button {
+  .stButton>button {
         width: 100%;
         border-radius: 10px;
+        font-weight: 600;
     }
-   .stMetric {
+  .stMetric {
         background-color: #f0f2f6;
         padding: 10px;
         border-radius: 10px;
+        text-align: center;
     }
     @media (max-width: 768px) {
-       .stColumns { flex-direction: column; }
+      .stColumns { flex-direction: column; }
     }
 </style>
 """, unsafe_allow_html=True)
 
-# YOUR SUPABASE CREDENTIALS
+# ========== SUPABASE CREDENTIALS ==========
 SUPABASE_URL = "https://vxdizbiaucutdutafuxv.supabase.co"
 SUPABASE_KEY = "sb_publishable_KwmVUTPjMdLlwDbiesqUVw_CTI2cpqX"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# PASSWORDS
+# ========== PASSWORDS ==========
 DEFAULT_STUDENT_PASSWORD = "BSKICTCLUB@2026"
+ADMIN_PASSWORD = "ADMINICTCLUB@2026"
 
-# CLUB POSTS
+# ========== ELECTION SETTINGS ==========
 POSITIONS = [
     "President", "Secretary", "Treasurer", "Speaker",
     "Projects Manager", "Mobiliser/Coordinator"
 ]
 
-# VOTING PERIOD
-VOTING_START = datetime(2026, 8, 8, 0, 0)
-VOTING_END = datetime(2026, 8, 18, 17, 0)
+VOTING_START = datetime(2026, 8, 8, 0, 0) # Aug 8 2026
+VOTING_END = datetime(2026, 8, 18, 17, 0) # Aug 18 2026 5pm
 
 CAN_VOTE_ROLES = ['student', 'candidate', 'president', 'patron']
 ADMIN_ROLES = ['patron', 'president']
 
 # ========== DATABASE FUNCTIONS ==========
 def get_election_status():
-    # Check if admin manually stopped election
     res = supabase.table("settings").select("is_active").eq("id", 1).execute()
     if res.data:
         return res.data[0]['is_active']
-    else: # create default if not exists
+    else:
         supabase.table("settings").insert({"id": 1, "is_active": True}).execute()
         return True
 
@@ -66,16 +67,25 @@ def set_election_status(status: bool):
     supabase.table("settings").update({"is_active": status}).eq("id", 1).execute()
 
 def login(username, password):
-    res = supabase.table("students").select("*").eq("username", username.lower()).eq("password", password).execute()
-    return res.data[0] if res.data else None
+    res = supabase.table("students").select("*").eq("username", username.lower()).execute()
+    if not res.data: return None
+
+    user = res.data[0]
+    # Check password based on role
+    if user['role'] in ADMIN_ROLES:
+        if password == ADMIN_PASSWORD: return user
+    else: # student or candidate
+        if password == DEFAULT_STUDENT_PASSWORD: return user
+    return None
 
 def register_student(name, username, role="student"):
     check = supabase.table("students").select("*").eq("username", username.lower()).execute()
-    if check.data:
-        return False, "Username already exists"
+    if check.data: return False, "Username already exists"
+
+    password = ADMIN_PASSWORD if role in ADMIN_ROLES else DEFAULT_STUDENT_PASSWORD
     supabase.table("students").insert({
         "name": name, "username": username.lower(),
-        "password": DEFAULT_STUDENT_PASSWORD, "role": role
+        "password": password, "role": role
     }).execute()
     return True, f"{role.title()} {name} registered successfully"
 
@@ -85,8 +95,8 @@ def get_candidates(position):
 
 def cast_vote(username, candidate_id, candidate_name, position):
     check = supabase.table("votes").select("*").eq("username", username).eq("position", position).execute()
-    if check.data:
-        return False, f"You have already voted for {position}"
+    if check.data: return False, f"You have already voted for {position}"
+
     supabase.table("votes").insert({
         "username": username, "candidate_id": candidate_id,
         "candidate_name": candidate_name, "position": position,
@@ -118,7 +128,7 @@ def reset_voter(username):
 def reset_election():
     supabase.table("votes").delete().neq("id", 0).execute()
     supabase.table("candidates").update({"votes": 0}).neq("id", 0).execute()
-    set_election_status(True) # reactivate election
+    set_election_status(True)
     return True
 
 # ========== SESSION STATE ==========
@@ -134,7 +144,7 @@ with col2:
     election_active_db = get_election_status()
     voting_open = VOTING_START <= now <= VOTING_END and election_active_db
 
-    if not election_active_db: st.error("Voting MANUALLY STOPPED by Admin")
+    if not election_active_db: st.error("Voting MANUALLY STOPPED")
     elif now < VOTING_START: st.warning(f"Starts: {VOTING_START.strftime('%d %b %H:%M')}")
     elif now > VOTING_END: st.error("Voting CLOSED - Time Ended")
     else: st.success(f"Voting OPEN - Ends {VOTING_END.strftime('%d %b %H:%M')}")
@@ -144,9 +154,10 @@ st.caption("Secure. Transparent. One vote per post. Powered by BSK ICT Club")
 # ========== LOGIN PAGE ==========
 if st.session_state.user is None:
     st.subheader("Member Login")
-    st.info(f"Username = Lastname lowercase. Example: mpoza | Password: {DEFAULT_STUDENT_PASSWORD}")
+    st.info(f"Students/Candidates Password: `{DEFAULT_STUDENT_PASSWORD}`")
+    st.warning(f"Patron/President Password: `{ADMIN_PASSWORD}`")
     with st.form("login_form"):
-        username = st.text_input("Username")
+        username = st.text_input("Username - Lastname lowercase")
         password = st.text_input("Password", type="password")
         if st.form_submit_button("Login", type="primary", use_container_width=True):
             user = login(username, password)
@@ -159,8 +170,9 @@ else:
     if st.sidebar.button("Logout", use_container_width=True):
         st.session_state.user = None; st.session_state.vote_receipt = []; st.rerun()
 
+    now = datetime.now()
     election_active_db = get_election_status()
-    voting_open = VOTING_START <= datetime.now() <= VOTING_END and election_active_db
+    voting_open = VOTING_START <= now <= VOTING_END and election_active_db
 
     # ========== VOTING PAGE ==========
     if user['role'] in CAN_VOTE_ROLES:
@@ -182,7 +194,7 @@ else:
                 already_voted = supabase.table("votes").select("*").eq("username", user['username']).eq("position", pos).execute()
                 if already_voted.data: st.success(f"✅ Already voted for {pos}")
                 elif candidates:
-                    cols = st.columns(2) # 2 columns better for mobile
+                    cols = st.columns(2) # 2 columns for mobile
                     for i, c in enumerate(candidates):
                         with cols[i % 2]:
                             st.metric(label=c['name'], value=f"{c['votes']} votes")
@@ -213,10 +225,9 @@ else:
                 if st.form_submit_button("Add", use_container_width=True):
                     supabase.table("candidates").insert({"name": name, "position": position, "votes": 0}).execute(); st.success(f"{name} added")
 
-        with tab2:
-            st.subheader("Live Results Dashboard"); show_results_to_all = True
+        with tab2: st.subheader("Live Results Dashboard"); show_results_to_all = True
 
-        with tab3: # NEW: MANUAL CONTROL
+        with tab3:
             st.subheader("Election Control Panel")
             current_status = "ACTIVE" if election_active_db else "STOPPED"
             st.write(f"Current Status: **{current_status}**")
@@ -227,7 +238,6 @@ else:
             with col_b:
                 if st.button("🔴 STOP ELECTION NOW", type="primary", use_container_width=True, disabled=not election_active_db):
                     set_election_status(False); st.error("Election Stopped Manually"); st.rerun()
-            st.caption("Use this to stop voting before Aug 18 if needed")
 
         if 'show_results_to_all' in locals() and show_results_to_all:
             results = get_results(); df = pd.DataFrame(results)
@@ -237,9 +247,9 @@ else:
                     if not pos_df.empty:
                         st.write(f"#### {pos}")
                         fig = px.bar(pos_df, x='votes', y='name', orientation='h', text='votes', color='votes',
-                                     color_continuous_scale=px.colors.sequential.Turbo, title=f"Votes for {pos}")
+                                     color_continuous_scale=px.colors.sequential.Turbo)
                         fig.update_traces(textposition='outside', marker=dict(cornerradius=12))
-                        fig.update_layout(showlegend=False, yaxis={'categoryorder':'total ascending'}, height=300, margin=dict(l=20, r=20, t=40, b=20))
+                        fig.update_layout(showlegend=False, yaxis={'categoryorder':'total ascending'}, height=300)
                         st.plotly_chart(fig, use_container_width=True)
                 st.download_button("📥 Download CSV", df.to_csv(index=False), "bsk_ict_results.csv")
             else: st.info("No candidates yet.")
@@ -248,10 +258,6 @@ else:
             audit = get_audit_log(); audit_df = pd.DataFrame(audit)
             if not audit_df.empty: st.dataframe(audit_df[['username','candidate_name','position','voted_at']], use_container_width=True, hide_index=True)
             else: st.info("No votes yet")
-
-        with tab4:
-            st.subheader("Restore Voter"); username_to_reset = st.text_input("Username to Reset")
-            if st.button("Reset Voter", use_container_width=True): reset_voter(username_to_reset); st.success(f"{username_to_reset} reset")
 
         with tab4:
             st.subheader("Restore Voter"); username_to_reset = st.text_input("Username to Reset")
