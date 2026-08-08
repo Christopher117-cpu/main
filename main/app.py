@@ -10,26 +10,13 @@ st.set_page_config(
     layout="wide",
     page_icon="🗳️",
     page_title="BSK ICT Club | Online Voting System",
-    initial_sidebar_state="collapsed" # Better for mobile
+    initial_sidebar_state="collapsed"
 )
 
-# CUSTOM CSS FOR MOBILE
 st.markdown("""
 <style>
-  .stButton>button {
-        width: 100%;
-        border-radius: 10px;
-        font-weight: 600;
-    }
-  .stMetric {
-        background-color: #f0f2f6;
-        padding: 10px;
-        border-radius: 10px;
-        text-align: center;
-    }
-    @media (max-width: 768px) {
-      .stColumns { flex-direction: column; }
-    }
+ .stButton>button { width: 100%; border-radius: 10px; font-weight: 600; }
+ .stMetric { background-color: #f0f2f6; padding: 10px; border-radius: 10px; text-align: center; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -38,7 +25,7 @@ SUPABASE_URL = "https://vxdizbiaucutdutafuxv.supabase.co"
 SUPABASE_KEY = "sb_publishable_KwmVUTPjMdLlwDbiesqUVw_CTI2cpqX"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ========== PASSWORDS ==========
+# ========== PASSWORDS - NOW HIDDEN ==========
 DEFAULT_STUDENT_PASSWORD = "BSKICTCLUB@2026"
 ADMIN_PASSWORD = "ADMINICTCLUB@2026"
 
@@ -48,20 +35,21 @@ POSITIONS = [
     "Projects Manager", "Mobiliser/Coordinator"
 ]
 
-VOTING_START = datetime(2026, 8, 8, 0, 0) # Aug 8 2026
-VOTING_END = datetime(2026, 8, 18, 17, 0) # Aug 18 2026 5pm
+VOTING_START = datetime(2026, 8, 8, 0, 0)
+VOTING_END = datetime(2026, 8, 18, 17, 0)
 
 CAN_VOTE_ROLES = ['student', 'candidate', 'president', 'patron']
 ADMIN_ROLES = ['patron', 'president']
 
 # ========== DATABASE FUNCTIONS ==========
 def get_election_status():
-    res = supabase.table("settings").select("is_active").eq("id", 1).execute()
-    if res.data:
-        return res.data[0]['is_active']
-    else:
-        supabase.table("settings").insert({"id": 1, "is_active": True}).execute()
-        return True
+    try:
+        res = supabase.table("settings").select("is_active").eq("id", 1).execute()
+        if res.data: return res.data[0]['is_active']
+        else:
+            supabase.table("settings").insert({"id": 1, "is_active": True}).execute()
+            return True
+    except: return True # Fallback if table missing
 
 def set_election_status(status: bool):
     supabase.table("settings").update({"is_active": status}).eq("id", 1).execute()
@@ -151,11 +139,11 @@ with col2:
 
 st.caption("Secure. Transparent. One vote per post. Powered by BSK ICT Club")
 
-# ========== LOGIN PAGE ==========
+# ========== LOGIN PAGE - ADMIN PASSWORD HIDDEN ==========
 if st.session_state.user is None:
     st.subheader("Member Login")
-    st.info(f"Students/Candidates Password: `{DEFAULT_STUDENT_PASSWORD}`")
-    st.warning(f"Patron/President Password: `{ADMIN_PASSWORD}`")
+    st.info(f"Students & Candidates: Use password `{DEFAULT_STUDENT_PASSWORD}`")
+    st.warning("Patron & President: Use your admin password") # <-- HIDDEN NOW
     with st.form("login_form"):
         username = st.text_input("Username - Lastname lowercase")
         password = st.text_input("Password", type="password")
@@ -194,7 +182,7 @@ else:
                 already_voted = supabase.table("votes").select("*").eq("username", user['username']).eq("position", pos).execute()
                 if already_voted.data: st.success(f"✅ Already voted for {pos}")
                 elif candidates:
-                    cols = st.columns(2) # 2 columns for mobile
+                    cols = st.columns(2)
                     for i, c in enumerate(candidates):
                         with cols[i % 2]:
                             st.metric(label=c['name'], value=f"{c['votes']} votes")
