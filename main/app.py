@@ -19,38 +19,24 @@ ADMIN_PASSWORD = "ADMINICTCLUB@2026"
 
 POSITIONS = ["President", "Secretary", "Treasurer", "Speaker", "Projects Manager", "Mobiliser/Coordinator"]
 VOTING_START = datetime(2026, 8, 8, 0, 0)
-VOTING_END = datetime(2026, 8, 18, 17, 0) # CHANGED TO 18TH 5PM
+VOTING_END = datetime(2026, 8, 18, 17, 0) # ENDS 18TH 5PM
 CAN_VOTE_ROLES = ['student', 'candidate', 'president', 'patron']
 ADMIN_ROLES = ['patron', 'president']
 
 # ========== PLOTLY CHART FUNCTION ==========
 def plot_horizontal_bars(df, position):
     fig = px.bar(
-        df,
-        x="votes",
-        y="name",
-        orientation='h', # HORIZONTAL
-        text="votes",
-        color="votes",
-        color_continuous_scale=px.colors.sequential.Blues # Like your photo
+        df, x="votes", y="name", orientation='h', text="votes",
+        color="votes", color_continuous_scale=px.colors.sequential.Blues
     )
-    fig.update_traces(
-        textposition='outside',
-        marker=dict(cornerradius=12) # ROUND CORNERS
-    )
+    fig.update_traces(textposition='outside', marker=dict(cornerradius=12))
     fig.update_layout(
-        title=f"<b>Results for: {position}</b>",
-        xaxis_title="Votes",
-        yaxis_title="",
-        showlegend=False,
-        height=100 + 50 * len(df), # auto height
-        plot_bgcolor='rgba(0,0,0,0)',
-        paper_bgcolor='rgba(0,0,0,0)',
-        font=dict(size=14),
-        margin=dict(l=20, r=20, t=40, b=20)
+        title=f"<b>Results for: {position}</b>", xaxis_title="Votes", yaxis_title="",
+        showlegend=False, height=max(200, 80 * len(df)), plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)', font=dict(size=14), margin=dict(l=20, r=40, t=40, b=20)
     )
-    fig.update_xaxes(showgrid=True, gridcolor='rgba(0,0,0,0.1)')
-    fig.update_yaxes(categoryorder='total ascending') # highest on top
+    fig.update_xaxes(showgrid=True, gridcolor='rgba(0,0,0,0.1)', range=[0, max(1, df['votes'].max() * 1.2)])
+    fig.update_yaxes(categoryorder='total ascending')
     return fig
 
 # ========== DB FUNCTIONS ==========
@@ -161,24 +147,22 @@ else:
     now = datetime.now()
     election_active_db = get_election_status()
     voting_open = VOTING_START <= now <= VOTING_END and election_active_db
+    all_voted = check_all_voted(user['username'])
+    show_results_to_all = False
 
     # ========== VOTING ==========
     if user['role'] in CAN_VOTE_ROLES:
-        all_voted = check_all_voted(user['username'])
-
         if not voting_open and not all_voted:
             st.error("Voting is currently closed")
-            if user['role'] in ADMIN_ROLES: show_results_to_all = True # Admin can see
-            else: show_results_to_all = False
+            if user['role'] in ADMIN_ROLES: show_results_to_all = True
         elif all_voted:
             st.success("✅ You have voted for all positions. Thank you!")
             st.subheader("Your Vote Receipt")
             for r in st.session_state.vote_receipt: st.write(f"- **{r['candidate']}** - {r['position']}")
             st.divider(); st.header("📊 Live Results"); show_results_to_all = True
         else:
-            show_results_to_all = False
             st.subheader("Cast Your Vote")
-            st.info("You will see live results only after voting for all 6 positions.")
+            st.info(f"You have voted {len([v for v in st.session_state.vote_receipt])}/{len(POSITIONS)} positions. Results appear after all 6.")
             for pos in POSITIONS:
                 st.divider(); st.write(f"### {pos}")
                 candidates = get_candidates(pos)
@@ -239,21 +223,6 @@ else:
                 if st.button("🔴 STOP ELECTION NOW", type="primary", use_container_width=True, disabled=not election_active_db):
                     set_election_status(False); st.error("Election Stopped Manually"); st.rerun()
 
-        if 'show_results_to_all' in locals() and show_results_to_all:
-            results = get_results(); df = pd.DataFrame(results)
-            if not df.empty:
-                for pos in POSITIONS:
-                    pos_df = df[df['position'] == pos].sort_values('votes', ascending=True)
-                    if not pos_df.empty:
-                        st.plotly_chart(plot_horizontal_bars(pos_df, pos), use_container_width=True)
-                st.download_button("📥 Download CSV", df.to_csv(index=False), "bsk_ict_results.csv")
-            else: st.info("No candidates yet.")
-
-            st.divider(); st.subheader("Audit Log")
-            audit = get_audit_log(); audit_df = pd.DataFrame(audit)
-            if not audit_df.empty: st.dataframe(audit_df[['username','candidate_name','position','voted_at']], use_container_width=True, hide_index=True)
-            else: st.info("No votes yet")
-
         with tab4:
             st.subheader("Restore Voter"); username_to_reset = st.text_input("Username to Reset")
             if st.button("Reset Voter", use_container_width=True):
@@ -265,6 +234,36 @@ else:
             if st.button("RESET ENTIRE ELECTION", type="primary", use_container_width=True):
                 reset_election()
                 st.success("Election Reset")
+
+    # ========== RESULTS DRAWING CODE - FIXED SCOPE ==========
+    if show_results_to_all:
+        results = get_results()
+        df = pd.DataFrame(results)
+
+        if not df.empty:
+            # FIX: ENSURE VOTES COLUMN EXISTS
+            if 'votes' not in df.columns:
+                df['votes'] = 0
+            df['votes'] = pd.to_numeric(df['votes'], errors='coerce').fillna(0)
+
+            candidates_found = 0
+            for pos in POSITIONS:
+                pos_df = df[df['position'] == pos].sort_values('votes', ascending=True)
+                if not pos_df.empty:
+                    candidates_found += len(pos_df)
+                    st.plotly_chart(plot_horizontal_bars(pos_df, pos), use_container_width=True)
+
+            if candidates_found == 0:
+                st.error("No candidates found. Go to Admin > Add Candidate")
+
+            st.download_button("📥 Download CSV", df.to_csv(index=False), "bsk_ict_results.csv")
+        else:
+            st.error("No data from candidates table. Check Supabase RLS: Allow SELECT for 'anon' role")
+
+        st.divider(); st.subheader("Audit Log")
+        audit = get_audit_log(); audit_df = pd.DataFrame(audit)
+        if not audit_df.empty: st.dataframe(audit_df[['username','candidate_name','position','voted_at']], use_container_width=True, hide_index=True)
+        else: st.info("No votes yet")
 
 st.markdown("---")
 st.markdown("<center>🗳️ <b>Developed by Mpoza Christopher</b> | BSK ICT Club 2026</center>", unsafe_allow_html=True)
