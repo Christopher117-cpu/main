@@ -19,7 +19,7 @@ ADMIN_PASSWORD = "ADMINICTCLUB@2026"
 
 POSITIONS = ["President", "Secretary", "Treasurer", "Speaker", "Projects Manager", "Mobiliser/Coordinator"]
 VOTING_START = datetime(2026, 8, 8, 0, 0)
-VOTING_END = datetime(2026, 8, 18, 17, 0) # ENDS 18TH 5PM
+VOTING_END = datetime(2026, 8, 18, 17, 0)
 CAN_VOTE_ROLES = ['student', 'candidate', 'president', 'patron']
 ADMIN_ROLES = ['patron', 'president']
 
@@ -61,6 +61,11 @@ def login(username, password):
     else:
         if password == DEFAULT_STUDENT_PASSWORD: return user
     return None
+
+# NEW FUNCTION: LOAD RECEIPT FROM DB
+def get_user_receipt(username):
+    res = supabase.table("votes").select("candidate_name, position").eq("username", username).execute()
+    return [{"candidate": v['candidate_name'], "position": v['position']} for v in res.data]
 
 def register_student(name, username, role="student"):
     check = supabase.table("students").select("*").eq("username", username.lower()).execute()
@@ -134,6 +139,8 @@ if st.session_state.user is None:
             user = login(username, password)
             if user:
                 st.session_state.user = user
+                # LOAD RECEIPT FROM DB ON LOGIN
+                st.session_state.vote_receipt = get_user_receipt(user['username'])
                 st.rerun()
             else:
                 st.error("Invalid Username or Password")
@@ -158,11 +165,16 @@ else:
         elif all_voted:
             st.success("✅ You have voted for all positions. Thank you!")
             st.subheader("Your Vote Receipt")
-            for r in st.session_state.vote_receipt: st.write(f"- **{r['candidate']}** - {r['position']}")
+            if st.session_state.vote_receipt:
+                for r in st.session_state.vote_receipt: 
+                    st.write(f"- **{r['candidate']}** - {r['position']}")
+            else:
+                st.info("Loading receipt...")
+                
             st.divider(); st.header("📊 Live Results"); show_results_to_all = True
         else:
             st.subheader("Cast Your Vote")
-            st.info(f"You have voted {len([v for v in st.session_state.vote_receipt])}/{len(POSITIONS)} positions. Results appear after all 6.")
+            st.info(f"You have voted {len(st.session_state.vote_receipt)}/{len(POSITIONS)} positions. Results appear after all 6.")
             for pos in POSITIONS:
                 st.divider(); st.write(f"### {pos}")
                 candidates = get_candidates(pos)
@@ -176,6 +188,7 @@ else:
                             if st.button(f"Vote {c['name']}", key=f"{pos}_{c['id']}", use_container_width=True):
                                 success, msg = cast_vote(user['username'], c['id'], c['name'], pos)
                                 if success:
+                                    # UPDATE RECEIPT IN SESSION TOO
                                     st.session_state.vote_receipt.append({"candidate": c['name'], "position": pos})
                                     st.success(msg)
                                     time.sleep(0.3)
@@ -235,26 +248,20 @@ else:
                 reset_election()
                 st.success("Election Reset")
 
-    # ========== RESULTS DRAWING CODE - FIXED SCOPE ==========
+    # ========== RESULTS DRAWING CODE ==========
     if show_results_to_all:
         results = get_results()
         df = pd.DataFrame(results)
 
         if not df.empty:
-            # FIX: ENSURE VOTES COLUMN EXISTS
             if 'votes' not in df.columns:
                 df['votes'] = 0
             df['votes'] = pd.to_numeric(df['votes'], errors='coerce').fillna(0)
 
-            candidates_found = 0
             for pos in POSITIONS:
                 pos_df = df[df['position'] == pos].sort_values('votes', ascending=True)
                 if not pos_df.empty:
-                    candidates_found += len(pos_df)
                     st.plotly_chart(plot_horizontal_bars(pos_df, pos), use_container_width=True)
-
-            if candidates_found == 0:
-                st.error("No candidates found. Go to Admin > Add Candidate")
 
             st.download_button("📥 Download CSV", df.to_csv(index=False), "bsk_ict_results.csv")
         else:
