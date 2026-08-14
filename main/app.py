@@ -260,7 +260,7 @@ else:
                 if not pos_df.empty:
                     st.plotly_chart(plot_horizontal_bars(pos_df, pos), use_container_width=True)
 
-            st.download_button("📥 Download CSV", df.to_csv(index=False), "bsk_ict_results.csv")
+            st.download_button(" Download CSV", df.to_csv(index=False), "bsk_ict_results.csv")
         else:
             st.error("No data from candidates table. Check Supabase RLS: Allow SELECT for 'anon' role")
 
