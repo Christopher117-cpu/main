@@ -62,7 +62,6 @@ def login(username, password):
         if password == DEFAULT_STUDENT_PASSWORD: return user
     return None
 
-# NEW FUNCTION: LOAD RECEIPT FROM DB
 def get_user_receipt(username):
     res = supabase.table("votes").select("candidate_name, position").eq("username", username).execute()
     return [{"candidate": v['candidate_name'], "position": v['position']} for v in res.data]
@@ -139,7 +138,6 @@ if st.session_state.user is None:
             user = login(username, password)
             if user:
                 st.session_state.user = user
-                # LOAD RECEIPT FROM DB ON LOGIN
                 st.session_state.vote_receipt = get_user_receipt(user['username'])
                 st.rerun()
             else:
@@ -166,11 +164,11 @@ else:
             st.success("✅ You have voted for all positions. Thank you!")
             st.subheader("Your Vote Receipt")
             if st.session_state.vote_receipt:
-                for r in st.session_state.vote_receipt: 
+                for r in st.session_state.vote_receipt:
                     st.write(f"- **{r['candidate']}** - {r['position']}")
             else:
                 st.info("Loading receipt...")
-                
+
             st.divider(); st.header("📊 Live Results"); show_results_to_all = True
         else:
             st.subheader("Cast Your Vote")
@@ -188,7 +186,6 @@ else:
                             if st.button(f"Vote {c['name']}", key=f"{pos}_{c['id']}", use_container_width=True):
                                 success, msg = cast_vote(user['username'], c['id'], c['name'], pos)
                                 if success:
-                                    # UPDATE RECEIPT IN SESSION TOO
                                     st.session_state.vote_receipt.append({"candidate": c['name'], "position": pos})
                                     st.success(msg)
                                     time.sleep(0.3)
@@ -267,10 +264,16 @@ else:
         else:
             st.error("No data from candidates table. Check Supabase RLS: Allow SELECT for 'anon' role")
 
-        st.divider(); st.subheader("Audit Log")
-        audit = get_audit_log(); audit_df = pd.DataFrame(audit)
-        if not audit_df.empty: st.dataframe(audit_df[['username','candidate_name','position','voted_at']], use_container_width=True, hide_index=True)
-        else: st.info("No votes yet")
+        # ========== AUDIT LOG - ADMIN ONLY ==========
+        if user['role'] in ADMIN_ROLES:
+            st.divider(); st.subheader("🔒 Audit Log - Admin Only")
+            st.warning("This shows who voted for who. Visible to Patron and President only.")
+            audit = get_audit_log(); audit_df = pd.DataFrame(audit)
+            if not audit_df.empty:
+                st.dataframe(audit_df[['username','candidate_name','position','voted_at']], use_container_width=True, hide_index=True)
+            else:
+                st.info("No votes yet")
+        # Students will not see anything here
 
 st.markdown("---")
 st.markdown("<center>🗳️ <b>Developed by Mpoza Christopher</b> | BSK ICT Club 2026</center>", unsafe_allow_html=True)
