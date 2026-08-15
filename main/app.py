@@ -32,7 +32,7 @@ def plot_horizontal_bars(df, position):
     fig.update_traces(textposition='outside', marker=dict(cornerradius=12))
     fig.update_layout(
         title=f"<b>Results for: {position}</b>", xaxis_title="Votes", yaxis_title="",
-        showlegend=False, height=max(200, 80 * len(df)), plot_bgcolor='rgba(0,0,0,0)',
+        showlegend=False, height=max(250, 70 * len(df)), plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)', font=dict(size=14), margin=dict(l=20, r=40, t=40, b=20)
     )
     fig.update_xaxes(showgrid=True, gridcolor='rgba(0,0,0,0.1)', range=[0, max(1, df['votes'].max() * 1.2)])
@@ -47,7 +47,9 @@ def get_election_status():
         else:
             supabase.table("settings").insert({"id": 1, "is_active": True}).execute()
             return True
-    except: return True
+    except Exception as e: 
+        st.error(f"DB Error: {e}")
+        return True
 
 def set_election_status(status: bool):
     supabase.table("settings").update({"is_active": status}).eq("id", 1).execute()
@@ -113,6 +115,7 @@ def reset_election():
 # ========== SESSION ==========
 if 'user' not in st.session_state: st.session_state.user = None
 if 'vote_receipt' not in st.session_state: st.session_state.vote_receipt = []
+if 'button_clicked' not in st.session_state: st.session_state.button_clicked = False
 
 # ========== HEADER ==========
 col1, col2 = st.columns([3,1])
@@ -179,19 +182,23 @@ else:
                 already_voted = supabase.table("votes").select("*").eq("username", user['username']).eq("position", pos).execute()
                 if already_voted.data: st.success(f"✅ Already voted for {pos}")
                 elif candidates:
-                    cols = st.columns(min(2, len(candidates)))
+                    cols = st.columns(min(3, len(candidates)))
                     for i, c in enumerate(candidates):
-                        with cols[i % 2]:
+                        with cols[i % len(cols)]:
                             st.metric(label=c['name'], value=f"{c['votes']} votes")
-                            if st.button(f"Vote {c['name']}", key=f"{pos}_{c['id']}", use_container_width=True):
+                            btn_key = f"vote_{pos}_{c['id']}"
+                            if st.button(f"Vote {c['name']}", key=btn_key, use_container_width=True, disabled=st.session_state.button_clicked):
+                                st.session_state.button_clicked = True
                                 success, msg = cast_vote(user['username'], c['id'], c['name'], pos)
                                 if success:
-                                    st.session_state.vote_receipt.append({"candidate": c['name'], "position": pos})
-                                    st.success(msg)
-                                    time.sleep(0.3)
+                                    st.success(msg) # FIXED: proper if/else
+                                    st.session_state.vote_receipt = get_user_receipt(user['username']) # Refresh receipt
+                                    time.sleep(0.5)
+                                    st.session_state.button_clicked = False
                                     st.rerun()
                                 else:
-                                    st.error(msg)
+                                    st.error(msg) # FIXED: proper if/else
+                                    st.session_state.button_clicked = False
                 else: st.warning(f"No candidates for {pos}")
 
     # ========== ADMIN ==========
@@ -207,7 +214,10 @@ else:
                 if st.form_submit_button("Register", use_container_width=True):
                     if name and username:
                         success, msg = register_student(name, username, role)
-                        st.success(msg) if success else st.error(msg)
+                        if success:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
                     else:
                         st.error("Fill all fields")
 
@@ -216,8 +226,11 @@ else:
             with st.form("add_candidate"):
                 name = st.text_input("Candidate Name"); position = st.selectbox("Position", POSITIONS)
                 if st.form_submit_button("Add", use_container_width=True):
-                    supabase.table("candidates").insert({"name": name, "position": position, "votes": 0}).execute()
-                    st.success(f"{name} added")
+                    if name:
+                        supabase.table("candidates").insert({"name": name, "position": position, "votes": 0}).execute()
+                        st.success(f"{name} added to {position}")
+                    else:
+                        st.error("Candidate name required")
 
         with tab2: st.subheader("Live Results Dashboard - Admin View"); show_results_to_all = True
 
@@ -236,33 +249,41 @@ else:
         with tab4:
             st.subheader("Restore Voter"); username_to_reset = st.text_input("Username to Reset")
             if st.button("Reset Voter", use_container_width=True):
-                reset_voter(username_to_reset)
-                st.success(f"{username_to_reset} reset")
+                if username_to_reset:
+                    reset_voter(username_to_reset)
+                    st.success(f"{username_to_reset} reset")
+                    st.rerun()
+                else:
+                    st.error("Enter username")
 
         with tab5:
             st.subheader("Danger Zone"); st.error("Deletes ALL votes")
             if st.button("RESET ENTIRE ELECTION", type="primary", use_container_width=True):
                 reset_election()
                 st.success("Election Reset")
+                st.rerun()
 
     # ========== RESULTS DRAWING CODE ==========
     if show_results_to_all:
-        results = get_results()
-        df = pd.DataFrame(results)
+        try:
+            results = get_results()
+            df = pd.DataFrame(results)
 
-        if not df.empty:
-            if 'votes' not in df.columns:
-                df['votes'] = 0
-            df['votes'] = pd.to_numeric(df['votes'], errors='coerce').fillna(0)
+            if not df.empty:
+                if 'votes' not in df.columns:
+                    df['votes'] = 0
+                df['votes'] = pd.to_numeric(df['votes'], errors='coerce').fillna(0).astype(int)
 
-            for pos in POSITIONS:
-                pos_df = df[df['position'] == pos].sort_values('votes', ascending=True)
-                if not pos_df.empty:
-                    st.plotly_chart(plot_horizontal_bars(pos_df, pos), use_container_width=True)
+                for pos in POSITIONS:
+                    pos_df = df[df['position'] == pos].sort_values('votes', ascending=True)
+                    if not pos_df.empty:
+                        st.plotly_chart(plot_horizontal_bars(pos_df, pos), use_container_width=True)
 
-            st.download_button(" Download CSV", df.to_csv(index=False), "bsk_ict_results.csv")
-        else:
-            st.error("No data from candidates table. Check Supabase RLS: Allow SELECT for 'anon' role")
+                st.download_button(" Download CSV", df.to_csv(index=False), "bsk_ict_results.csv")
+            else:
+                st.error("No data from candidates table. Check Supabase RLS: Allow SELECT for 'anon' role")
+        except Exception as e:
+            st.error(f"Error loading results: {e}")
 
         # ========== AUDIT LOG - ADMIN ONLY ==========
         if user['role'] in ADMIN_ROLES:
@@ -273,7 +294,6 @@ else:
                 st.dataframe(audit_df[['username','candidate_name','position','voted_at']], use_container_width=True, hide_index=True)
             else:
                 st.info("No votes yet")
-        # Students will not see anything here
 
 st.markdown("---")
 st.markdown("<center>🗳️ <b>Developed by Mpoza Christopher</b> | BSK ICT Club 2026</center>", unsafe_allow_html=True)
