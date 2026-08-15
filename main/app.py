@@ -19,7 +19,7 @@ ADMIN_PASSWORD = "ADMINICTCLUB@2026"
 
 POSITIONS = ["President", "Secretary", "Treasurer", "Speaker", "Projects Manager", "Mobiliser/Coordinator"]
 VOTING_START = datetime(2026, 8, 8, 0, 0)
-VOTING_END = datetime(2026, 8, 18, 17, 0)
+VOTING_END = datetime(2026, 9, 26, 17, 0) # <-- CHANGED TO 26 SEPTEMBER 5PM
 CAN_VOTE_ROLES = ['student', 'candidate', 'president', 'patron']
 ADMIN_ROLES = ['patron', 'president']
 
@@ -47,7 +47,7 @@ def get_election_status():
         else:
             supabase.table("settings").insert({"id": 1, "is_active": True}).execute()
             return True
-    except Exception as e: 
+    except Exception as e:
         st.error(f"DB Error: {e}")
         return True
 
@@ -191,13 +191,13 @@ else:
                                 st.session_state.button_clicked = True
                                 success, msg = cast_vote(user['username'], c['id'], c['name'], pos)
                                 if success:
-                                    st.success(msg) # FIXED: proper if/else
-                                    st.session_state.vote_receipt = get_user_receipt(user['username']) # Refresh receipt
+                                    st.success(msg)
+                                    st.session_state.vote_receipt = get_user_receipt(user['username'])
                                     time.sleep(0.5)
                                     st.session_state.button_clicked = False
                                     st.rerun()
                                 else:
-                                    st.error(msg) # FIXED: proper if/else
+                                    st.error(msg)
                                     st.session_state.button_clicked = False
                 else: st.warning(f"No candidates for {pos}")
 
